@@ -20,12 +20,18 @@ Live token speed in [Pi](https://pi.dev/)'s footer. No commands to run, no dashb
 Requires Node.js 22.19+ and Pi. Tested with Pi 0.87.1.
 
 ```bash
+pi install npm:pi-live-speed
+```
+
+Or install straight from Git:
+
+```bash
 pi install git:github.com/aisensiy/pi-live-speed
 ```
 
 Restart Pi or run `/reload`, then send a message. If you previously installed `token-speed.ts`, disable or remove it first to avoid duplicate displays.
 
-The repository currently contains the **0.1.0 release candidate**, available through Git; it has not been published to npm. Live display, response logs and cancellation have been checked on the author's machine. Testing on a second machine is next.
+Live display, response logs and cancellation have been checked on the author's machine. Testing on a second machine is next.
 
 ## Good to know
 
