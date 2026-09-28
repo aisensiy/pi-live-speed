@@ -56,6 +56,8 @@ Separate successes, errors, user cancellations and incomplete samples. Report co
 
 Compare equivalent provider/model, timing source, input/cache and output length ranges. Thinking settings and task difficulty can still confound results; v1 does not record every such dimension and is not a controlled benchmark. Answer quality needs separate tests, task outcomes or human ratings.
 
-## Pending acceptance
+## Acceptance status
 
-Before migrating the personal installation: verify real terminal visibility during waiting, output and stalls; narrow-width behavior; cancel/reload behavior; and live provider usage reporting. Automated event replay and loader tests do not substitute for those checks.
+The author's Pi 0.87.1 installation has been migrated and reloaded. Single-copy footer display and continuous updates were visually confirmed; recorded output usage matched real provider session messages. A manual cancellation produced an `aborted` record, and the footer timer stopped.
+
+Automated tests additionally cover waits and stalls without incoming chunks, lifecycle cleanup, configuration and log failures. Real narrow-width behavior and installation on a second machine remain unverified; the author will perform the latter before the release announcement.

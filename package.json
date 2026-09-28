@@ -1,10 +1,13 @@
 {
   "name": "pi-live-speed",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
-  "description": "Live token speed in Pi's footer, with persistent provider performance records.",
+  "description": "See token speed live in Pi's footer, while the model is still generating.",
+  "license": "MIT",
   "type": "module",
-  "engines": { "node": ">=22.19.0" },
+  "engines": {
+    "node": ">=22.19.0"
+  },
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
