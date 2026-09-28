@@ -8,7 +8,7 @@ Live token speed in [Pi](https://pi.dev/)'s footer. No commands to run, no dashb
 ⚡ ~42.0 tok/s · ttft 2.3s · gen 4.1s
 ```
 
-![pi-live-speed footer showing live token speed](docs/demo.mp4)
+![pi-live-speed footer showing live token speed](docs/demo.gif)
 
 - **Live speed:** refreshes every 250 ms, even when the stream pauses.
 - **Live waiting time:** see how long you've been waiting for the first token.
