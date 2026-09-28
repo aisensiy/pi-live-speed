@@ -4,9 +4,40 @@
   "private": true,
   "description": "Live token speed in Pi's footer, with persistent provider performance records.",
   "type": "module",
-  "keywords": ["pi-package", "tokens", "performance"],
-  "repository": { "type": "git", "url": "https://github.com/aisensiy/pi-live-speed.git" },
-  "files": ["src", "scripts", "README.md"],
-  "pi": { "extensions": ["./src/index.ts"] },
-  "peerDependencies": { "@earendil-works/pi-coding-agent": "*" }
+  "engines": { "node": ">=22.19.0" },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "check:load": "node scripts/check-load.mjs",
+    "check": "npm run typecheck && npm test && npm run check:load"
+  },
+  "keywords": [
+    "pi-package",
+    "tokens",
+    "performance"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aisensiy/pi-live-speed.git"
+  },
+  "files": [
+    "src",
+    "scripts/token-speed-stats.sh",
+    "README.md",
+    "docs"
+  ],
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.87.1",
+    "@types/node": "^26.6.3",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.2"
+  }
 }

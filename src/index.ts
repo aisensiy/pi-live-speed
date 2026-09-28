@@ -1,146 +1,111 @@
-/**
- * Token speed — 在底部状态栏显示模型输出速度与首 token 延迟。
- *
- * 锚点：
- * - turn_start：你发消息、agent 开始处理
- * - 第一个内容增量（text/thinking/toolcall delta）：真正的"第一个 token"
- * - message_end：响应结束
- *
- * 显示：
- * - 等待首 token：`⏳ 1.2s`
- * - 流式输出中：`⚡ ~42 tok/s`（按增量估算，分母从第一个 token 起算）
- * - 结束后：`⚡ 45 tok/s · ttft 1.2s · 3.5s`
- *   tok/s = usage.output ÷ 纯生成时长；ttft = 首 token − turn_start，仅每轮
- *   第一个模型响应显示（后续响应前面隔着工具执行时间，无法干净归因）。
- *
- * 口径说明：usage.output 含 reasoning/thinking token（思考也算输出）。
- *
- * 放在 ~/.pi/agent/extensions/ 下自动加载，改动后用 /reload 热重载。
- */
+import { randomUUID } from "node:crypto";
+import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { finalStatus, Meter, type Outcome, type Usage } from "./meter.ts";
+import { appendRecord, loadConfig, type Config } from "./storage.ts";
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { appendFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+const KEY = "pi-live-speed";
+const WARNING_KEY = "pi-live-speed-log";
 
-const KEY = "tok-speed";
-const LOG = join(homedir(), ".pi", "agent", "token-speed.jsonl");
+export default function liveSpeed(pi: ExtensionAPI): void {
+  let active: Meter | undefined;
+  let timer: ReturnType<typeof setInterval> | undefined;
+  let config: Config = { logging: false, logPath: "" };
+  let warned = false;
 
-// 口径：这里的速度是你「实际体验」的值——含服务端停顿，不含工具执行时间
-// （因为按每次模型响应计时，工具执行落在响应之间）。
-// true = 每次响应结束后在底部保留一行（速度 · 首字等待 · 生成时长）；
-// false = 只在流式期间显示，结束即清除。
-const SHOW_FINAL_LINE = true;
-const UPDATE_INTERVAL_MS = 250;
+  function warn(ctx: ExtensionContext, message: string): void {
+    if (warned) return;
+    warned = true;
+    // Do not expose filesystem errors: they may contain private paths or values.
+    ctx.ui.setStatus(WARNING_KEY, "⚠ live-speed log unavailable");
+    ctx.ui.notify(message, "warning");
+  }
 
-/** 粗略 token 估算：CJK 字符约 1 字 1 token，其余约 4 字符 1 token */
-function estimateTokens(text: string): number {
-	let cjk = 0;
-	let other = 0;
-	for (const ch of text) {
-		if (/[\u3000-\u9fff\uff00-\uffef]/.test(ch)) cjk++;
-		else other++;
-	}
-	return cjk + Math.ceil(other / 4);
-}
+  function stopTimer(): void {
+    if (timer) clearInterval(timer);
+    timer = undefined;
+  }
 
-const fmt = (n: number) => (n >= 100 ? Math.round(n).toString() : n.toFixed(1));
+  function finish(ctx: ExtensionContext, status: Outcome, stopReason: string | null, usage?: Usage): void {
+    if (!active) return;
+    const record = active.finish(performance.now(), Date.now(), status, stopReason, usage);
+    active = undefined;
+    stopTimer();
+    ctx.ui.setStatus(KEY, finalStatus(record));
+    if (config.logging) {
+      try {
+        appendRecord(config.logPath, record);
+      } catch {
+        warn(ctx, "pi-live-speed could not append its performance log. Check the configured path and permissions.");
+      }
+    }
+  }
 
-export default function (pi: ExtensionAPI) {
-	let turnStartedAt = 0;
-	let firstAssistantOfTurn = false;
+  function start(ctx: ExtensionContext, source: "turn_start" | "message_start"): void {
+    if (active) finish(ctx, "incomplete", "superseded");
+    active = new Meter({
+      sessionId: ctx.sessionManager.getSessionId(),
+      responseId: randomUUID(),
+      provider: ctx.model?.provider ?? null,
+      model: ctx.model?.id ?? null,
+    }, performance.now(), Date.now(), source);
+    ctx.ui.setStatus(KEY, active.live(performance.now()));
+    if (ctx.hasUI) {
+      timer = setInterval(() => {
+        if (active) ctx.ui.setStatus(KEY, active.live(performance.now()));
+      }, 250);
+      timer.unref();
+    }
+  }
 
-	let startedAt = 0; // 当前 assistant 消息的 message_start
-	let ttftAnchor = 0; // 本轮 turn_start（仅每轮第一个 assistant 消息有）
-	let firstDeltaAt = 0; // 第一个内容增量到达时刻
-	let deltaTokens = 0;
-	let lastRender = 0;
+  pi.on("session_start", (_event, ctx) => {
+    finish(ctx, "incomplete", "session-switch");
+    stopTimer();
+    warned = false;
+    ctx.ui.setStatus(KEY, undefined);
+    ctx.ui.setStatus(WARNING_KEY, undefined);
+    try {
+      config = loadConfig(getAgentDir());
+    } catch {
+      config = { logging: false, logPath: "" };
+      warn(ctx, "pi-live-speed config could not be read. Logging is disabled until a successful reload; check pi-live-speed.json.");
+    }
+  });
 
-	pi.on("turn_start", async () => {
-		turnStartedAt = Date.now();
-		firstAssistantOfTurn = true;
-	});
-
-	pi.on("message_start", async (event, ctx) => {
-		if (event.message.role !== "assistant") return;
-		startedAt = Date.now();
-		ttftAnchor = firstAssistantOfTurn ? turnStartedAt : 0;
-		firstAssistantOfTurn = false;
-		firstDeltaAt = 0;
-		deltaTokens = 0;
-		lastRender = 0;
-		ctx.ui.setStatus(KEY, ttftAnchor ? "⏳ …" : "⚡ …");
-	});
-
-	pi.on("message_update", async (event, ctx) => {
-		if (!startedAt) return;
-		const msg = event.message as any;
-		if (!msg || msg.role !== "assistant") return;
-
-		const ev = (event as any).assistantMessageEvent;
-		if (ev && (ev.type === "text_delta" || ev.type === "thinking_delta" || ev.type === "toolcall_delta")) {
-			if (!firstDeltaAt) firstDeltaAt = Date.now();
-			deltaTokens += estimateTokens(ev.delta ?? "");
-		}
-
-		const now = Date.now();
-		if (now - lastRender < UPDATE_INTERVAL_MS) return;
-		lastRender = now;
-
-		if (!firstDeltaAt) {
-			if (ttftAnchor) ctx.ui.setStatus(KEY, `⏳ ${((now - ttftAnchor) / 1000).toFixed(1)}s`);
-			return;
-		}
-		const gen = (now - firstDeltaAt) / 1000;
-		if (gen <= 0) return;
-		ctx.ui.setStatus(KEY, `⚡ ~${fmt(deltaTokens / gen)} tok/s`);
-	});
-
-	pi.on("message_end", async (event, ctx) => {
-		const msg = event.message as any;
-		if (!msg || msg.role !== "assistant") return;
-		startedAt = 0;
-
-		const output = msg.usage?.output ?? 0;
-		if (!firstDeltaAt || output <= 0) {
-			ctx.ui.setStatus(KEY, undefined);
-			return;
-		}
-
-		const gen = (Date.now() - firstDeltaAt) / 1000;
-		const ttft = ttftAnchor ? (firstDeltaAt - ttftAnchor) / 1000 : undefined;
-		if (gen <= 0.05) {
-			ctx.ui.setStatus(KEY, undefined);
-			return;
-		}
-
-		// 逐次追加记录，便于事后分析平均速度与慢的归因
-		try {
-			appendFileSync(
-				LOG,
-				JSON.stringify({
-					ts: Date.now(),
-					provider: msg.provider,
-					model: msg.model,
-					ttftSec: ttft !== undefined ? +ttft.toFixed(2) : undefined,
-					genSec: +gen.toFixed(2),
-					outputTokens: output,
-					tps: +(output / gen).toFixed(1),
-					stopReason: msg.stopReason,
-				}) + "\n",
-			);
-		} catch {
-			// 日志失败不影响显示
-		}
-
-		if (!SHOW_FINAL_LINE) {
-			ctx.ui.setStatus(KEY, undefined);
-			return;
-		}
-
-		let text = `⚡ ${fmt(output / gen)} tok/s`;
-		if (ttft !== undefined && ttft >= 0) text += ` · ttft ${ttft.toFixed(1)}s`;
-		text += ` · ${gen.toFixed(1)}s`;
-		ctx.ui.setStatus(KEY, text);
-	});
+  // A Pi turn is one assistant response plus any subsequent tools, not a whole user prompt.
+  // Starting here measures client-observed wait, including context preparation, not network-only TTFT.
+  pi.on("turn_start", (_event, ctx) => start(ctx, "turn_start"));
+  pi.on("message_start", (event, ctx) => {
+    if (event.message.role !== "assistant") return;
+    if (!active) start(ctx, "message_start");
+    if (active) {
+      active.identity.provider = event.message.provider;
+      active.identity.model = event.message.model;
+    }
+  });
+  pi.on("message_update", (event, ctx) => {
+    if (!active || event.message.role !== "assistant") return;
+    const delta = event.assistantMessageEvent;
+    if (delta.type === "text_delta" || delta.type === "thinking_delta" || delta.type === "toolcall_delta") {
+      active.delta(delta.delta, performance.now());
+      // Ticker handles steady rendering; headless clients still receive an updated status.
+      if (!timer) ctx.ui.setStatus(KEY, active.live(performance.now()));
+    }
+  });
+  pi.on("message_end", (event, ctx) => {
+    const message = event.message;
+    if (message.role !== "assistant") return;
+    if (active) {
+      active.identity.provider = message.provider;
+      active.identity.model = message.model;
+    }
+    const outcome = message.stopReason === "error" || message.stopReason === "aborted" ? message.stopReason : "completed";
+    finish(ctx, outcome, message.stopReason, message.usage);
+  });
+  pi.on("agent_end", (_event, ctx) => finish(ctx, "incomplete", "agent-end-without-message"));
+  pi.on("session_shutdown", (_event, ctx) => {
+    finish(ctx, "incomplete", "session-shutdown");
+    stopTimer();
+    ctx.ui.setStatus(KEY, undefined);
+    ctx.ui.setStatus(WARNING_KEY, undefined);
+  });
 }
