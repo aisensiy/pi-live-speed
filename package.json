@@ -1,6 +1,6 @@
 {
-  "name": "pi-live-speed",
-  "version": "0.1.2",
+  "name": "@aisensiy/pi-live-speed",
+  "version": "1.0.0",
   "description": "See token speed live in Pi's footer, while the model is still generating.",
   "license": "MIT",
   "type": "module",
