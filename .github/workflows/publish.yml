@@ -1,0 +1,43 @@
+name: Publish to npm
+
+# Publishes to npm when a version tag (vX.Y.Z) is pushed.
+# Requires a repo secret NPM_TOKEN (Settings -> Secrets and variables -> Actions).
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run checks (typecheck, tests, isolated load)
+        run: npm run check
+
+      - name: Verify tag matches package version
+        run: |
+          pkg_version=$(node -p "require('./package.json').version")
+          tag_version="${GITHUB_REF_NAME#v}"
+          if [ "$pkg_version" != "$tag_version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $pkg_version"
+            exit 1
+          fi
+          echo "Publishing $pkg_version from tag $GITHUB_REF_NAME"
+
+      - name: Publish to npm
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
