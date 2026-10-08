@@ -40,7 +40,7 @@ const fmt = (n: number) => n >= 100 ? Math.round(n).toString() : n.toFixed(1);
 
 /** A response clock; all durations use injected monotonic milliseconds. Never retains content. */
 export class Meter {
-  private firstDelta: number | null = null;
+  private firstContent: number | null = null;
   private cjk = 0;
   private other = 0;
 
@@ -51,9 +51,14 @@ export class Meter {
     readonly timingSource: RecordV1["timingSource"],
   ) {}
 
+  /** Mark observed output without adding bytes to the token estimate. */
+  observeContent(now: number): void {
+    this.firstContent ??= now;
+  }
+
   delta(text: string, now: number): void {
     if (!text) return;
-    this.firstDelta ??= now;
+    this.observeContent(now);
     // UTF-16 units keep the estimate invariant even when a surrogate pair is split across chunks.
     for (let i = 0; i < text.length; i++) {
       const code = text.charCodeAt(i);
@@ -63,14 +68,14 @@ export class Meter {
   }
 
   live(now: number): string {
-    if (this.firstDelta === null) return `⏳ ttft ${fmt((now - this.start) / 1000)}s`;
-    const gen = (now - this.firstDelta) / 1000;
+    if (this.firstContent === null) return `⏳ ttft ${fmt((now - this.start) / 1000)}s`;
+    const gen = (now - this.firstContent) / 1000;
     const speed = gen >= 0.05 ? `~${fmt((this.cjk + this.other / 4) / gen)}` : "--";
-    return `⚡ ${speed} tok/s · ttft ${fmt((this.firstDelta - this.start) / 1000)}s · gen ${fmt(gen)}s`;
+    return `⚡ ${speed} tok/s · ttft ${fmt((this.firstContent - this.start) / 1000)}s · gen ${fmt(gen)}s`;
   }
 
   finish(now: number, wall: number, status: Outcome, stopReason: string | null, usage?: Usage): RecordV1 {
-    const gen = this.firstDelta === null ? null : (now - this.firstDelta) / 1000;
+    const gen = this.firstContent === null ? null : (now - this.firstContent) / 1000;
     const output = count(usage?.output);
     let unavailableReason: string | null = null;
     let tps: number | null = null;
@@ -86,7 +91,7 @@ export class Meter {
       startedAt: this.startedAt,
       ts: wall,
       elapsedSec: (now - this.start) / 1000,
-      ttftSec: this.firstDelta === null ? null : (this.firstDelta - this.start) / 1000,
+      ttftSec: this.firstContent === null ? null : (this.firstContent - this.start) / 1000,
       genSec: gen,
       outputTokens: output,
       inputTokens: count(usage?.input),

@@ -11,12 +11,12 @@ Source: [Pi v0.87.1 agent-loop.ts](https://github.com/earendil-works/pi/blob/v0.
 We deliberately do not use provider request hooks as a primary clock: their public events do not carry a response/request correlation ID, and nested model calls or internal retries cannot safely be attributed to one assistant response. This first version favors an explicit client-observed wait over a misleading network-only TTFT.
 
 - Start: monotonic clock at `turn_start`; fallback to `message_start` if a host omits the turn event. `timingSource` records the distinction.
-- First content: first non-empty `text_delta`, `thinking_delta` or `toolcall_delta`. Start events and empty deltas do not count.
+- First content: first non-empty `text_delta`, `thinking_delta` or `toolcall_delta`, or a `toolcall_start` whose content block already contains a non-empty tool name. A named tool call is observable model output even before its argument deltas arrive. Empty starts, text/thinking start markers and empty deltas do not count.
 - TTFT: first content minus start. Includes client preparation and transport, potentially provider-internal retries.
 - Generation seconds: `message_end` minus first content. Includes stream stalls and final usage/stream-finalization delays. Never subtracts stalls.
 - Final TPS: positive, finite provider `usage.output` divided by generation seconds. Output includes reasoning if the provider accounts for it there.
-- Live TPS: accumulated CJK units plus other UTF-16 units divided by four, divided by generation seconds. Fractional counts are accumulated, not rounded per chunk. This is a heuristic, not tokenization; always marked `~`.
-- Fewer than 50 ms of generation, missing positive output usage, or no content delta: TPS is `null`, never a fabricated zero. Zero usage may mean an unreported value, not necessarily zero work.
+- Live TPS: accumulated CJK units plus other UTF-16 units divided by four, divided by generation seconds. Fractional counts are accumulated, not rounded per chunk. Tool names mark timing only and add no estimated tokens; final TPS still uses provider usage. This is a heuristic, not tokenization; always marked `~`.
+- Fewer than 50 ms of generation, missing positive output usage, or no observed content: TPS is `null`, never a fabricated zero. Zero usage may mean an unreported value, not necessarily zero work.
 
 Durations use `performance.now()` and survive wall-clock changes. Epoch timestamps use `Date.now()` for historical grouping. Client buffering, hidden reasoning and bursty delivery can distort measured speed; it is not the server's internal decoding throughput.
 
@@ -49,6 +49,12 @@ Each line is a standalone object. No prior line or process-global state is neede
 | `stopReason` | Pi terminal reason or a lifecycle category such as `session-shutdown` |
 
 Raw prompts, deltas, reasoning, tool arguments, endpoint URLs and error text are never added to these records. Existing legacy history is not rewritten or mixed with schema v1 by default.
+
+## Tool-call timing correction (issue #2)
+
+Previously, only non-empty deltas stopped TTFT. If a tool name arrived at 1 second but its first argument delta arrived at 6 seconds, TTFT was recorded as 6 seconds. With the named-start correction it is 1 second, and the intervening 5 seconds belong to generation. Tool execution itself remains outside both response intervals because it follows `message_end`.
+
+The JSONL shape remains schema v1 and existing rows are not rewritten. Historical tool-first responses can therefore have longer TTFT and shorter generation intervals (and higher final TPS) than measurements after this correction. The legacy `no-content-delta` reason now means no qualifying content event, including no named tool start. Do not treat pre/post-correction tool-first samples as directly equivalent.
 
 ## Comparing suppliers
 
