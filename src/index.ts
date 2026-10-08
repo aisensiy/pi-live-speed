@@ -89,7 +89,7 @@ export default function liveSpeed(pi: ExtensionAPI): void {
       const block = delta.partial.content[delta.contentIndex];
       if (block?.type !== "toolCall" || !block.name) return;
       // A tool name is already output; do not wait for its argument deltas.
-      active.observeContent(performance.now());
+      active.observeContent(performance.now(), "named-tool-call");
     } else if (delta.type === "text_delta" || delta.type === "thinking_delta" || delta.type === "toolcall_delta") {
       active.delta(delta.delta, performance.now());
     } else {
