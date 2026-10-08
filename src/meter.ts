@@ -24,6 +24,7 @@ export interface RecordV1 extends Identity {
   ttftSec: number | null;
   genSec: number | null;
   outputTokens: number | null;
+  firstContentSource: "named-tool-call" | "content-delta" | null;
   inputTokens: number | null;
   cacheReadTokens: number | null;
   cacheWriteTokens: number | null;
@@ -41,6 +42,7 @@ const fmt = (n: number) => n >= 100 ? Math.round(n).toString() : n.toFixed(1);
 /** A response clock; all durations use injected monotonic milliseconds. Never retains content. */
 export class Meter {
   private firstContent: number | null = null;
+  private firstContentSource: RecordV1["firstContentSource"] = null;
   private cjk = 0;
   private other = 0;
 
@@ -52,13 +54,16 @@ export class Meter {
   ) {}
 
   /** Mark observed output without adding bytes to the token estimate. */
-  observeContent(now: number): void {
-    this.firstContent ??= now;
+  observeContent(now: number, source: Exclude<RecordV1["firstContentSource"], null>): void {
+    if (this.firstContent === null) {
+      this.firstContent = now;
+      this.firstContentSource = source;
+    }
   }
 
   delta(text: string, now: number): void {
     if (!text) return;
-    this.observeContent(now);
+    this.observeContent(now, "content-delta");
     // UTF-16 units keep the estimate invariant even when a surrogate pair is split across chunks.
     for (let i = 0; i < text.length; i++) {
       const code = text.charCodeAt(i);
@@ -94,6 +99,7 @@ export class Meter {
       ttftSec: this.firstContent === null ? null : (this.firstContent - this.start) / 1000,
       genSec: gen,
       outputTokens: output,
+      firstContentSource: this.firstContentSource,
       inputTokens: count(usage?.input),
       cacheReadTokens: count(usage?.cacheRead),
       cacheWriteTokens: count(usage?.cacheWrite),

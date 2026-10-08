@@ -42,6 +42,7 @@ Each line is a standalone object. No prior line or process-global state is neede
 | `startedAt`, `ts` | Start/end epoch milliseconds |
 | `elapsedSec`, `ttftSec`, `genSec` | Monotonic durations in seconds; unavailable TTFT/generation is null |
 | `outputTokens`, `inputTokens`, `cacheReadTokens`, `cacheWriteTokens` | Non-negative provider usage, or null if missing/invalid |
+| `firstContentSource` | `named-tool-call` when TTFT stopped on a tool name, `content-delta` for the first text/thinking/argument delta, null with no observed content. Added after the issue #2 correction; older rows omit the field and must not be treated as delta-confirmed |
 | `tokenSource` | `provider-usage` when output is positive, otherwise `unavailable` |
 | `tps` | Final average, or null |
 | `unavailableReason` | Null when measurable; otherwise `no-content-delta`, `short-generation`, or `no-output-usage` |

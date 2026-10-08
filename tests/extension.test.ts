@@ -74,7 +74,7 @@ it("ticks without deltas, includes pauses, then uses final usage and stops its t
   expect(statuses.get("pi-live-speed")).toContain("gen 4.0s");
   emit("message_end", { message: assistant() });
   expect(rows()).toHaveLength(1);
-  expect(rows()[0]).toMatchObject({ tps: 25, ttftSec: 2, genSec: 4, status: "completed" });
+  expect(rows()[0]).toMatchObject({ tps: 25, ttftSec: 2, genSec: 4, status: "completed", firstContentSource: "content-delta" });
   expect(vi.getTimerCount()).toBe(0);
   emit("agent_end");
   expect(rows()).toHaveLength(1);
@@ -140,7 +140,7 @@ it("recognizes a named tool call as first output before its arguments arrive", (
   delta('{"command":"pwd"}', "toolcall_delta");
   vi.advanceTimersByTime(1000);
   emit("message_end", { message });
-  expect(rows()[0]).toMatchObject({ ttftSec: 1, genSec: 6 });
+  expect(rows()[0]).toMatchObject({ ttftSec: 1, genSec: 6, firstContentSource: "named-tool-call" });
 });
 
 it.each([true, false])("times a named tool call without argument deltas (UI=%s) without estimating name tokens", (hasUI) => {
@@ -166,7 +166,7 @@ it.each([["", 0], ["bash", 1]] as const)("ignores tool starts without an observe
   delta("{}", "toolcall_delta");
   vi.advanceTimersByTime(1000);
   emit("message_end", { message: assistant("toolUse", 10) });
-  expect(rows()[0]).toMatchObject({ ttftSec: 3, genSec: 1 });
+  expect(rows()[0]).toMatchObject({ ttftSec: 3, genSec: 1, firstContentSource: "content-delta" });
 });
 
 it("does not reset first output when a named tool call follows thinking", () => {
@@ -188,7 +188,7 @@ it.each(["error", "aborted"])("logs %s before any output exactly once", (reason)
   emit("agent_end");
   emit("session_shutdown");
   expect(rows()).toHaveLength(1);
-  expect(rows()[0]).toMatchObject({ status: reason, tps: null, ttftSec: null });
+  expect(rows()[0]).toMatchObject({ status: reason, tps: null, ttftSec: null, firstContentSource: null });
 });
 
 it("separates exposed automatic retry turns", () => {
