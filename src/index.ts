@@ -85,11 +85,18 @@ export default function liveSpeed(pi: ExtensionAPI): void {
   pi.on("message_update", (event, ctx) => {
     if (!active || event.message.role !== "assistant") return;
     const delta = event.assistantMessageEvent;
-    if (delta.type === "text_delta" || delta.type === "thinking_delta" || delta.type === "toolcall_delta") {
+    if (delta.type === "toolcall_start") {
+      const block = delta.partial.content[delta.contentIndex];
+      if (block?.type !== "toolCall" || !block.name) return;
+      // A tool name is already output; do not wait for its argument deltas.
+      active.observeContent(performance.now());
+    } else if (delta.type === "text_delta" || delta.type === "thinking_delta" || delta.type === "toolcall_delta") {
       active.delta(delta.delta, performance.now());
-      // Ticker handles steady rendering; headless clients still receive an updated status.
-      if (!timer) ctx.ui.setStatus(KEY, active.live(performance.now()));
+    } else {
+      return;
     }
+    // Ticker handles steady rendering; headless clients still receive an updated status.
+    if (!timer) ctx.ui.setStatus(KEY, active.live(performance.now()));
   });
   pi.on("message_end", (event, ctx) => {
     const message = event.message;

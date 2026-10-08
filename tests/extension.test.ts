@@ -22,6 +22,17 @@ function assistant(stopReason = "stop", output = 100, model = "model") {
 function delta(text = "abcd", type = "text_delta") {
   emit("message_update", { message: assistant(), assistantMessageEvent: { type, delta: text } });
 }
+function toolStart(name: string, contentIndex = 0) {
+  const message = {
+    ...assistant("toolUse", 10),
+    content: [{ type: "toolCall", id: "call", name, arguments: {} }],
+  };
+  emit("message_update", {
+    message,
+    assistantMessageEvent: { type: "toolcall_start", contentIndex, partial: message },
+  });
+  return message;
+}
 function rows(): RecordV1[] {
   const path = join(environment.dir, "pi-live-speed.jsonl");
   return existsSync(path) ? readFileSync(path, "utf8").trim().split("\n").map(line => JSON.parse(line)) : [];
@@ -86,6 +97,87 @@ it("does not include tool execution in the next response", () => {
   expect(rows()).toHaveLength(2);
   expect(rows()[1]).toMatchObject({ model: "other-model", ttftSec: 1, genSec: 2, tps: 20 });
   expect(rows()[0].responseId).not.toBe(rows()[1].responseId);
+});
+
+it.each([0, 30_000, 120_000])("keeps TTFT independent of a %ims tool execution and tool argument generation", (toolDuration) => {
+  emit("turn_start");
+  emit("message_start", { message: assistant("toolUse", 10) });
+  vi.advanceTimersByTime(1000);
+  // A tool-only response has no text or thinking deltas before its arguments.
+  delta('{"command":', "toolcall_delta");
+  vi.advanceTimersByTime(5000);
+  delta('"pwd"}', "toolcall_delta");
+  emit("message_end", { message: assistant("toolUse", 10) });
+  const finishedStatus = statuses.get("pi-live-speed");
+  expect(rows()[0]).toMatchObject({ ttftSec: 1, genSec: 5, elapsedSec: 6 });
+  expect(vi.getTimerCount()).toBe(0);
+
+  emit("tool_execution_start", { toolCallId: "call", toolName: "bash", args: {} });
+  vi.advanceTimersByTime(toolDuration);
+  emit("tool_execution_end", { toolCallId: "call", toolName: "bash", isError: false });
+  emit("message_start", { message: { role: "toolResult" } });
+  emit("message_end", { message: { role: "toolResult" } });
+  emit("turn_end");
+  expect(statuses.get("pi-live-speed")).toBe(finishedStatus);
+  expect(rows()).toHaveLength(1);
+
+  emit("turn_start");
+  expect(statuses.get("pi-live-speed")).toBe("⏳ ttft 0.0s");
+  emit("message_start", { message: assistant() });
+  vi.advanceTimersByTime(2000);
+  delta("answer");
+  vi.advanceTimersByTime(1000);
+  emit("message_end", { message: assistant() });
+  expect(rows()[1]).toMatchObject({ ttftSec: 2, genSec: 1, elapsedSec: 3 });
+});
+
+it("recognizes a named tool call as first output before its arguments arrive", () => {
+  emit("turn_start");
+  emit("message_start", { message: assistant("toolUse", 10) });
+  vi.advanceTimersByTime(1000);
+  const message = toolStart("bash");
+  vi.advanceTimersByTime(5000);
+  delta('{"command":"pwd"}', "toolcall_delta");
+  vi.advanceTimersByTime(1000);
+  emit("message_end", { message });
+  expect(rows()[0]).toMatchObject({ ttftSec: 1, genSec: 6 });
+});
+
+it.each([true, false])("times a named tool call without argument deltas (UI=%s) without estimating name tokens", (hasUI) => {
+  ctx.hasUI = hasUI;
+  emit("turn_start");
+  vi.advanceTimersByTime(1000);
+  const message = toolStart("bash");
+  if (!hasUI) expect(statuses.get("pi-live-speed")).toContain("ttft 1.0s · gen 0.0s");
+  vi.advanceTimersByTime(2000);
+  // Use an empty delta to request a headless refresh without adding content.
+  delta("", "toolcall_delta");
+  expect(statuses.get("pi-live-speed")).toContain("~0.0 tok/s · ttft 1.0s · gen 2.0s");
+  emit("message_end", { message });
+  expect(rows()[0]).toMatchObject({ ttftSec: 1, genSec: 2, tps: 5, unavailableReason: null });
+});
+
+it.each([["", 0], ["bash", 1]] as const)("ignores tool starts without an observed name (%s, index %i)", (name, index) => {
+  emit("turn_start");
+  vi.advanceTimersByTime(1000);
+  toolStart(name, index);
+  vi.advanceTimersByTime(2000);
+  expect(statuses.get("pi-live-speed")).toBe("⏳ ttft 3.0s");
+  delta("{}", "toolcall_delta");
+  vi.advanceTimersByTime(1000);
+  emit("message_end", { message: assistant("toolUse", 10) });
+  expect(rows()[0]).toMatchObject({ ttftSec: 3, genSec: 1 });
+});
+
+it("does not reset first output when a named tool call follows thinking", () => {
+  emit("turn_start");
+  vi.advanceTimersByTime(1000);
+  delta("thinking", "thinking_delta");
+  vi.advanceTimersByTime(2000);
+  const message = toolStart("bash");
+  vi.advanceTimersByTime(1000);
+  emit("message_end", { message });
+  expect(rows()[0]).toMatchObject({ ttftSec: 1, genSec: 3 });
 });
 
 it.each(["error", "aborted"])("logs %s before any output exactly once", (reason) => {
