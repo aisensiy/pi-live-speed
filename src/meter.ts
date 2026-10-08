@@ -41,8 +41,7 @@ const fmt = (n: number) => n >= 100 ? Math.round(n).toString() : n.toFixed(1);
 
 /** A response clock; all durations use injected monotonic milliseconds. Never retains content. */
 export class Meter {
-  private firstContent: number | null = null;
-  private firstContentSource: RecordV1["firstContentSource"] = null;
+  private firstContent: { at: number; source: Exclude<RecordV1["firstContentSource"], null> } | null = null;
   private cjk = 0;
   private other = 0;
 
@@ -53,12 +52,9 @@ export class Meter {
     readonly timingSource: RecordV1["timingSource"],
   ) {}
 
-  /** Mark observed output without adding bytes to the token estimate. */
-  observeContent(now: number, source: Exclude<RecordV1["firstContentSource"], null>): void {
-    if (this.firstContent === null) {
-      this.firstContent = now;
-      this.firstContentSource = source;
-    }
+  /** Mark observed output without adding bytes to the token estimate; first source wins. */
+  observeContent(at: number, source: Exclude<RecordV1["firstContentSource"], null>): void {
+    this.firstContent ??= { at, source };
   }
 
   delta(text: string, now: number): void {
@@ -74,13 +70,13 @@ export class Meter {
 
   live(now: number): string {
     if (this.firstContent === null) return `⏳ ttft ${fmt((now - this.start) / 1000)}s`;
-    const gen = (now - this.firstContent) / 1000;
+    const gen = (now - this.firstContent.at) / 1000;
     const speed = gen >= 0.05 ? `~${fmt((this.cjk + this.other / 4) / gen)}` : "--";
-    return `⚡ ${speed} tok/s · ttft ${fmt((this.firstContent - this.start) / 1000)}s · gen ${fmt(gen)}s`;
+    return `⚡ ${speed} tok/s · ttft ${fmt((this.firstContent.at - this.start) / 1000)}s · gen ${fmt(gen)}s`;
   }
 
   finish(now: number, wall: number, status: Outcome, stopReason: string | null, usage?: Usage): RecordV1 {
-    const gen = this.firstContent === null ? null : (now - this.firstContent) / 1000;
+    const gen = this.firstContent === null ? null : (now - this.firstContent.at) / 1000;
     const output = count(usage?.output);
     let unavailableReason: string | null = null;
     let tps: number | null = null;
@@ -96,10 +92,10 @@ export class Meter {
       startedAt: this.startedAt,
       ts: wall,
       elapsedSec: (now - this.start) / 1000,
-      ttftSec: this.firstContent === null ? null : (this.firstContent - this.start) / 1000,
+      ttftSec: this.firstContent === null ? null : (this.firstContent.at - this.start) / 1000,
       genSec: gen,
       outputTokens: output,
-      firstContentSource: this.firstContentSource,
+      firstContentSource: this.firstContent?.source ?? null,
       inputTokens: count(usage?.input),
       cacheReadTokens: count(usage?.cacheRead),
       cacheWriteTokens: count(usage?.cacheWrite),

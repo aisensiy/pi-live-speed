@@ -177,7 +177,7 @@ it("does not reset first output when a named tool call follows thinking", () => 
   const message = toolStart("bash");
   vi.advanceTimersByTime(1000);
   emit("message_end", { message });
-  expect(rows()[0]).toMatchObject({ ttftSec: 1, genSec: 3 });
+  expect(rows()[0]).toMatchObject({ ttftSec: 1, genSec: 3, firstContentSource: "content-delta" });
 });
 
 it.each(["error", "aborted"])("logs %s before any output exactly once", (reason) => {
